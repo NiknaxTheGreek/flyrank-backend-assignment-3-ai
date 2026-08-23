@@ -26,7 +26,7 @@ def create_app(repository: TaskRepository | None = None) -> FastAPI:
     app = FastAPI(
         title="FlyRank Backend Assignment 2",
         version="1.0.0",
-        description="SQLite-backed persistence for the Assignment 1 task CRUD API.",
+        description="PostgreSQL-backed persistence for the final Assignment 2 task CRUD API.",
         lifespan=lifespan,
     )
     app.state.repository = task_repository
