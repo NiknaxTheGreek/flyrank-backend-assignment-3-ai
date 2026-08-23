@@ -1,0 +1,11 @@
+.env
+.git
+.github
+.pytest_cache
+__pycache__
+*.py[cod]
+node_modules
+dist
+README.md
+REQUIREMENTS_AUDIT.md
+VERIFICATION_EVIDENCE.md
