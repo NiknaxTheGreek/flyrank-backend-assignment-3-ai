@@ -11,7 +11,6 @@
 | Exact Assignment 2 root and health responses | Assignment 2-compatible FastAPI route layer | Compatibility suite | PASS |
 | Exact Assignment 2 task shape and CRUD behavior | `id`, nullable `title`, nullable `done`; Assignment 2 request/error behavior | Compatibility suite | PASS |
 | Only storage differs | Assignment 2-compatible routes use the PostgreSQL repository interface | Route/repository review and compatibility suite | PASS |
-| Shared client/dashboard compatibility | OpenAPI source, generated clients, dashboard, and API health route use Assignment 2 task fields and health path | Code generation, typechecks, and dashboard/API-server builds | PASS |
 | PostgreSQL in Docker | Compose `db` service and API image | Compose rendering | PASS |
 | One-command application/database startup | `docker compose up --build` | README and Compose rendering | PASS |
 | Persistent PostgreSQL volume | `flyrank_postgres_data` | Compose rendering; verifier source | PASS |
