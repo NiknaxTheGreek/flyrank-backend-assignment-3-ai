@@ -3,7 +3,7 @@ from __future__ import annotations
 from collections.abc import Iterable
 from contextlib import contextmanager
 from dataclasses import dataclass
-from typing import Any, Protocol
+from typing import Protocol
 
 import psycopg
 from psycopg.rows import dict_row
@@ -12,15 +12,14 @@ from psycopg.rows import dict_row
 @dataclass(frozen=True)
 class Task:
     id: int
-    title: str
-    description: str
-    completed: bool
+    title: str | None
+    done: bool | None
 
 
-STARTER_TASKS: tuple[tuple[str, str, bool], ...] = (
-    ("Review the assignment", "Read the FastAPI and PostgreSQL requirements.", False),
-    ("Start the API", "Run docker compose up --build.", False),
-    ("Verify persistence", "Restart the compose stack without removing volumes.", False),
+STARTER_TASKS: tuple[tuple[str, bool], ...] = (
+    ("Learn FastAPI", False),
+    ("Build a CRUD API", False),
+    ("Read the assignment", True),
 )
 
 
@@ -31,9 +30,11 @@ class TaskRepository(Protocol):
 
     def get_task(self, task_id: int) -> Task | None: ...
 
-    def create_task(self, title: str, description: str, completed: bool) -> Task: ...
+    def create_task(self, title: str, done: bool) -> Task: ...
 
-    def update_task(self, task_id: int, changes: dict[str, Any]) -> Task | None: ...
+    def update_task(
+        self, task_id: int, title: str | None, done: bool | None, fields: set[str]
+    ) -> Task | None: ...
 
     def delete_task(self, task_id: int) -> bool: ...
 
@@ -41,9 +42,8 @@ class TaskRepository(Protocol):
 def _task_from_row(row: dict[str, Any]) -> Task:
     return Task(
         id=int(row["id"]),
-        title=str(row["title"]),
-        description=str(row["description"]),
-        completed=bool(row["completed"]),
+        title=row["title"],
+        done=row["done"],
     )
 
 
@@ -66,10 +66,26 @@ class PostgresTaskRepository:
                 """
                 CREATE TABLE IF NOT EXISTS tasks (
                     id BIGSERIAL PRIMARY KEY,
-                    title VARCHAR(200) NOT NULL,
-                    description VARCHAR(2000) NOT NULL DEFAULT '',
-                    completed BOOLEAN NOT NULL DEFAULT FALSE
+                    title VARCHAR(200),
+                    done BOOLEAN
                 )
+                """
+            )
+            cursor.execute("ALTER TABLE tasks ADD COLUMN IF NOT EXISTS done BOOLEAN")
+            cursor.execute("ALTER TABLE tasks ALTER COLUMN title DROP NOT NULL")
+            cursor.execute(
+                """
+                DO $$
+                BEGIN
+                    IF EXISTS (
+                        SELECT 1
+                        FROM information_schema.columns
+                        WHERE table_name = 'tasks' AND column_name = 'completed'
+                    ) THEN
+                        EXECUTE 'UPDATE tasks SET done = completed WHERE done IS NULL';
+                    END IF;
+                END
+                $$
                 """
             )
             # A transaction-level table lock avoids duplicate starter rows if two
@@ -80,8 +96,8 @@ class PostgresTaskRepository:
             if row and row["task_count"] == 0:
                 cursor.executemany(
                     """
-                    INSERT INTO tasks (title, description, completed)
-                    VALUES (%s, %s, %s)
+                    INSERT INTO tasks (title, done)
+                    VALUES (%s, %s)
                     """,
                     STARTER_TASKS,
                 )
@@ -90,7 +106,7 @@ class PostgresTaskRepository:
         with self._connection() as connection, connection.cursor() as cursor:
             cursor.execute(
                 """
-                SELECT id, title, description, completed
+                SELECT id, title, done
                 FROM tasks
                 ORDER BY id
                 """
@@ -101,7 +117,7 @@ class PostgresTaskRepository:
         with self._connection() as connection, connection.cursor() as cursor:
             cursor.execute(
                 """
-                SELECT id, title, description, completed
+                SELECT id, title, done
                 FROM tasks
                 WHERE id = %s
                 """,
@@ -110,33 +126,40 @@ class PostgresTaskRepository:
             row = cursor.fetchone()
             return _task_from_row(row) if row else None
 
-    def create_task(self, title: str, description: str, completed: bool) -> Task:
+    def create_task(self, title: str, done: bool) -> Task:
         with self._connection() as connection, connection.cursor() as cursor:
             cursor.execute(
                 """
-                INSERT INTO tasks (title, description, completed)
-                VALUES (%s, %s, %s)
-                RETURNING id, title, description, completed
+                INSERT INTO tasks (title, done)
+                VALUES (%s, %s)
+                RETURNING id, title, done
                 """,
-                (title, description, completed),
+                (title, done),
             )
             return _task_from_row(cursor.fetchone())
 
-    def update_task(self, task_id: int, changes: dict[str, Any]) -> Task | None:
-        allowed_fields = {"title", "description", "completed"}
-        if not changes or not set(changes).issubset(allowed_fields):
+    def update_task(
+        self, task_id: int, title: str | None, done: bool | None, fields: set[str]
+    ) -> Task | None:
+        if not fields or not fields.issubset({"title", "done"}):
             raise ValueError("invalid task update")
 
-        assignments = ", ".join(f"{field_name} = %s" for field_name in changes)
-        values = [changes[field_name] for field_name in changes]
+        assignments: list[str] = []
+        values: list[str | bool | None] = []
+        if "title" in fields:
+            assignments.append("title = %s")
+            values.append(title)
+        if "done" in fields:
+            assignments.append("done = %s")
+            values.append(done)
         values.append(task_id)
         with self._connection() as connection, connection.cursor() as cursor:
             cursor.execute(
                 f"""
                 UPDATE tasks
-                SET {assignments}
+                SET {", ".join(assignments)}
                 WHERE id = %s
-                RETURNING id, title, description, completed
+                RETURNING id, title, done
                 """,
                 values,
             )
@@ -159,8 +182,8 @@ class InMemoryTaskRepository:
     def initialize(self) -> None:
         if self._tasks:
             return
-        for title, description, completed in STARTER_TASKS:
-            self.create_task(title, description, completed)
+        for title, done in STARTER_TASKS:
+            self.create_task(title, done)
 
     def list_tasks(self) -> list[Task]:
         return [self._tasks[task_id] for task_id in sorted(self._tasks)]
@@ -168,26 +191,26 @@ class InMemoryTaskRepository:
     def get_task(self, task_id: int) -> Task | None:
         return self._tasks.get(task_id)
 
-    def create_task(self, title: str, description: str, completed: bool) -> Task:
+    def create_task(self, title: str, done: bool) -> Task:
         task = Task(
             id=self._next_id,
             title=title,
-            description=description,
-            completed=completed,
+            done=done,
         )
         self._tasks[task.id] = task
         self._next_id += 1
         return task
 
-    def update_task(self, task_id: int, changes: dict[str, Any]) -> Task | None:
+    def update_task(
+        self, task_id: int, title: str | None, done: bool | None, fields: set[str]
+    ) -> Task | None:
         existing = self._tasks.get(task_id)
         if not existing:
             return None
         task = Task(
             id=existing.id,
-            title=changes.get("title", existing.title),
-            description=changes.get("description", existing.description),
-            completed=changes.get("completed", existing.completed),
+            title=title if "title" in fields else existing.title,
+            done=done if "done" in fields else existing.done,
         )
         self._tasks[task_id] = task
         return task
