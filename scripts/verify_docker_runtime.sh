@@ -10,7 +10,19 @@ POSTGRES_USER="verify_user"
 POSTGRES_PASSWORD="verify_password"
 POSTGRES_DB="verify_db"
 ENV_FILE="$(mktemp)"
-COMPOSE=(docker compose --project-name "$PROJECT_NAME" --env-file "$ENV_FILE" -f "$PROJECT_DIR/docker-compose.yml")
+COMPOSE=(
+  env
+  -u DATABASE_URL
+  -u POSTGRES_USER
+  -u POSTGRES_PASSWORD
+  -u POSTGRES_DB
+  -u API_PORT
+  -u APP_ENV_FILE
+  docker compose
+  --project-name "$PROJECT_NAME"
+  --env-file "$ENV_FILE"
+  -f "$PROJECT_DIR/docker-compose.yml"
+)
 
 cleanup() {
   "${COMPOSE[@]}" down -v --remove-orphans >/dev/null 2>&1 || true
@@ -22,6 +34,8 @@ cat >"$ENV_FILE" <<EOF
 POSTGRES_USER=$POSTGRES_USER
 POSTGRES_PASSWORD=$POSTGRES_PASSWORD
 POSTGRES_DB=$POSTGRES_DB
+DATABASE_URL=postgresql://$POSTGRES_USER:$POSTGRES_PASSWORD@db:5432/$POSTGRES_DB
+APP_ENV_FILE=$ENV_FILE
 API_PORT=$API_PORT
 EOF
 
@@ -50,14 +64,14 @@ test "$seed_count" = "3"
 
 created="$(curl --fail --silent --request POST "http://127.0.0.1:${API_PORT}/tasks" \
   --header "Content-Type: application/json" \
-  --data '{"title":"Docker persistence check","description":"Created by the external verifier.","completed":false}')"
+  --data '{"title":"Docker persistence check"}')"
 task_id="$(printf '%s' "$created" | json_field id)"
 
 curl --fail --silent "http://127.0.0.1:${API_PORT}/tasks/${task_id}" >/dev/null
 curl --fail --silent --request PUT "http://127.0.0.1:${API_PORT}/tasks/${task_id}" \
   --header "Content-Type: application/json" \
-  --data '{"completed":true}' \
-  | python3 -c 'import json, sys; assert json.load(sys.stdin)["completed"] is True'
+  --data '{"done":true}' \
+  | python3 -c 'import json, sys; assert json.load(sys.stdin)["done"] is True'
 
 stored_title="$("${COMPOSE[@]}" exec -T db psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -tAc \
   "SELECT title FROM tasks WHERE id = ${task_id}")"
@@ -69,6 +83,6 @@ echo "Restarting without -v to prove named-volume persistence."
 wait_for_api
 
 persisted="$(curl --fail --silent "http://127.0.0.1:${API_PORT}/tasks/${task_id}")"
-printf '%s' "$persisted" | python3 -c 'import json, sys; payload=json.load(sys.stdin); assert payload["title"] == "Docker persistence check"; assert payload["completed"] is True'
+printf '%s' "$persisted" | python3 -c 'import json, sys; payload=json.load(sys.stdin); assert payload["title"] == "Docker persistence check"; assert payload["done"] is True'
 
 echo "Docker runtime verification passed."
