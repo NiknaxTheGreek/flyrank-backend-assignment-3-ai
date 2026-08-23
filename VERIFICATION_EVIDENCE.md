@@ -6,11 +6,16 @@ This file separates current, directly observed results from historical external 
 
 | Check | Command | Actual result |
 | --- | --- | --- |
+| Shared OpenAPI client generation | `pnpm --filter @workspace/api-spec codegen` | Passed |
+| Shared-library typecheck | `pnpm -w run typecheck:libs` | Passed |
+| Assignment 3 dashboard typecheck and build | `pnpm --filter @workspace/flyrank-backend-assignment-3 run typecheck`; production build with managed `PORT` and `BASE_PATH` | Passed |
+| API server build | `pnpm --filter @workspace/api-server run build` | Passed |
 | Assignment 2 compatibility and static suite | `python -m pytest backend/tests -q` | Passed: **10 passed** |
 | Python syntax | `find backend -type f -name '*.py' -print0 \| xargs -0 python -m py_compile` | Passed |
 | Required `.env` Compose rendering | `APP_ENV_FILE=.env.example docker compose --env-file .env.example config` | Passed |
 | Docker verifier shell syntax | `bash -n scripts/verify_docker_runtime.sh` | Passed |
 | Whitespace | `git diff --check -- artifacts/flyrank-backend-assignment-3` | Passed |
+| Obsolete task contract scan | `rg` scan for `healthz` and `completed` across the Assignment 3 dashboard, generated clients, OpenAPI source, and API server | No stale contract references found |
 
 ## Current Docker runtime attempt
 
