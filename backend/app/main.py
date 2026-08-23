@@ -5,24 +5,15 @@ from contextlib import asynccontextmanager
 from typing import AsyncIterator
 
 from fastapi import FastAPI, Request, Response, status
+from fastapi.encoders import jsonable_encoder
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 
-from .models import ErrorResponse, TaskInput, TaskResponse, TaskUpdate
+from .models import Task, TaskCreate, TaskUpdate
 from .repository import PostgresTaskRepository, TaskRepository
 
 
-def _as_response(task: object) -> TaskResponse:
-    return TaskResponse.model_validate(task, from_attributes=True)
-
-
-def _not_found() -> JSONResponse:
-    return JSONResponse(status_code=status.HTTP_404_NOT_FOUND, content={"error": "Task not found"})
-
-
 def create_app(repository: TaskRepository | None = None) -> FastAPI:
-    """Create an app that can be supplied an isolated repository in tests."""
-
     task_repository = repository or PostgresTaskRepository(
         os.environ.get("DATABASE_URL", "")
     )
@@ -33,75 +24,91 @@ def create_app(repository: TaskRepository | None = None) -> FastAPI:
         yield
 
     app = FastAPI(
-        title="FlyRank Backend Assignment 3",
+        title="FlyRank Backend Assignment 2",
         version="1.0.0",
-        description="Containerized FastAPI and PostgreSQL task API.",
+        description="SQLite-backed persistence for the Assignment 1 task CRUD API.",
         lifespan=lifespan,
     )
+    app.state.repository = task_repository
 
     @app.exception_handler(RequestValidationError)
-    async def request_validation_error(
+    async def invalid_request(
         _: Request, exc: RequestValidationError
     ) -> JSONResponse:
         return JSONResponse(
             status_code=status.HTTP_400_BAD_REQUEST,
-            content={"error": f"Invalid request: {exc.errors()[0]['msg']}"},
+            content=jsonable_encoder({"error": "Invalid request body"}),
         )
 
-    @app.get("/health", response_model=dict[str, str])
+    def get_repository(request: Request) -> TaskRepository:
+        return request.app.state.repository
+
+    @app.get("/", status_code=status.HTTP_200_OK)
+    def api_information() -> dict[str, str | list[str]]:
+        return {
+            "name": "Task API",
+            "version": "1.0",
+            "endpoints": ["/tasks"],
+        }
+
+    @app.get("/health", status_code=status.HTTP_200_OK)
     def health() -> dict[str, str]:
         return {"status": "ok"}
 
-    @app.get("/tasks", response_model=list[TaskResponse])
-    def list_tasks() -> list[TaskResponse]:
-        return [_as_response(task) for task in task_repository.list_tasks()]
+    @app.get("/tasks", response_model=list[Task], status_code=status.HTTP_200_OK)
+    def list_tasks(request: Request) -> list[Task]:
+        return get_repository(request).list_tasks()
 
-    @app.post(
-        "/tasks",
-        response_model=TaskResponse,
-        status_code=status.HTTP_201_CREATED,
-        responses={400: {"model": ErrorResponse}},
-    )
-    def create_task(payload: TaskInput) -> TaskResponse:
-        task = task_repository.create_task(
-            payload.title, payload.description, payload.completed
-        )
-        return _as_response(task)
-
-    @app.get(
-        "/tasks/{task_id}",
-        response_model=TaskResponse,
-        responses={400: {"model": ErrorResponse}, 404: {"model": ErrorResponse}},
-    )
-    def get_task(task_id: int) -> TaskResponse | JSONResponse:
-        task = task_repository.get_task(task_id)
+    @app.get("/tasks/{task_id}", response_model=Task, status_code=status.HTTP_200_OK)
+    def get_task(request: Request, task_id: int) -> Task | JSONResponse:
+        task = get_repository(request).get_task(task_id)
         if task is None:
-            return _not_found()
-        return _as_response(task)
+            return JSONResponse(
+                status_code=status.HTTP_404_NOT_FOUND,
+                content={"error": f"Task {task_id} not found"},
+            )
+        return task
 
-    @app.put(
-        "/tasks/{task_id}",
-        response_model=TaskResponse,
-        responses={400: {"model": ErrorResponse}, 404: {"model": ErrorResponse}},
-    )
-    def update_task(task_id: int, payload: TaskUpdate) -> TaskResponse | JSONResponse:
+    @app.post("/tasks", response_model=Task, status_code=status.HTTP_201_CREATED)
+    def create_task(payload: TaskCreate, request: Request) -> Task:
+        return get_repository(request).create_task(payload.title, False)
+
+    @app.put("/tasks/{task_id}", response_model=Task, status_code=status.HTTP_200_OK)
+    def update_task(
+        payload: TaskUpdate, request: Request, task_id: int
+    ) -> Task | JSONResponse:
+        task_repository = get_repository(request)
+        if task_repository.get_task(task_id) is None:
+            return JSONResponse(
+                status_code=status.HTTP_404_NOT_FOUND,
+                content={"error": f"Task {task_id} not found"},
+            )
+
+        supplied = payload.model_fields_set
+        if not supplied or supplied.isdisjoint({"title", "done"}):
+            return JSONResponse(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                content={"error": "Request body must include title and/or done"},
+            )
+
         task = task_repository.update_task(
-            task_id, payload.model_dump(exclude_unset=True)
+            task_id, title=payload.title, done=payload.done, fields=supplied
         )
         if task is None:
-            return _not_found()
-        return _as_response(task)
+            return JSONResponse(
+                status_code=status.HTTP_404_NOT_FOUND,
+                content={"error": f"Task {task_id} not found"},
+            )
+        return task
 
-    @app.delete(
-        "/tasks/{task_id}",
-        status_code=status.HTTP_204_NO_CONTENT,
-        response_class=Response,
-        response_model=None,
-        responses={400: {"model": ErrorResponse}, 404: {"model": ErrorResponse}},
-    )
-    def delete_task(task_id: int) -> Response | JSONResponse:
-        if not task_repository.delete_task(task_id):
-            return _not_found()
+    @app.delete("/tasks/{task_id}", status_code=status.HTTP_204_NO_CONTENT)
+    def delete_task(request: Request, task_id: int) -> Response:
+        deleted = get_repository(request).delete_task(task_id)
+        if not deleted:
+            return JSONResponse(
+                status_code=status.HTTP_404_NOT_FOUND,
+                content={"error": f"Task {task_id} not found"},
+            )
         return Response(status_code=status.HTTP_204_NO_CONTENT)
 
     return app
