@@ -1,0 +1,73 @@
+name: Assignment 3 Docker Runtime Gate
+
+on:
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - "backend/**"
+      - "Dockerfile"
+      - "docker-compose.yml"
+      - "requirements.txt"
+      - "scripts/verify_docker_runtime.sh"
+      - ".github/workflows/docker-runtime.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  verify-current-code:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+
+      - name: Prepare evidence directory
+        run: mkdir -p evidence
+
+      - name: Install Python dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements.txt
+
+      - name: Run regression suite
+        run: python -m pytest backend/tests -q
+
+      - name: Record Docker runtime
+        run: |
+          {
+            docker --version
+            docker compose version
+          } | tee evidence/docker-runtime-versions.txt
+
+      - name: Run Compose PostgreSQL persistence gate
+        shell: bash
+        run: |
+          set -o pipefail
+          bash scripts/verify_docker_runtime.sh 2>&1 | tee evidence/docker-runtime-gate-current-code.txt
+
+      - name: Capture diagnostics on failure
+        if: failure()
+        shell: bash
+        run: |
+          {
+            echo "Workflow failed before or during the runtime gate."
+            echo "Inspect the workflow logs and any captured verifier output."
+          } | tee evidence/docker-runtime-failure-note.txt
+
+      - name: Upload runtime evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: assignment-3-docker-runtime-gate
+          path: evidence/
+          if-no-files-found: error
