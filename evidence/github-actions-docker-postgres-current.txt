@@ -1,0 +1,29 @@
+Assignment 3 current-code Docker/PostgreSQL verification
+Source: GitHub Actions run 32700227130, job 97350086773
+Date: 2026-08-24 UTC
+Workflow: Assignment 3 Docker Runtime Gate
+
+Observed results from the successful job log:
+
+10 passed in 0.07s
+Docker version 28.0.4, build b8034c0
+Docker Compose version v2.38.2
+Container flyrank_assignment3_verify_18383_23876-db-1  Healthy
+Restarting without -v to prove named-volume persistence.
+Container flyrank_assignment3_verify_18383_23876-db-1  Healthy
+Docker runtime verification passed.
+
+The verifier executed the current repository code. Its scripted checks include:
+- fresh isolated Compose project startup;
+- exactly three seed tasks;
+- live POST/GET/PUT task CRUD through the API;
+- direct PostgreSQL psql query of the created row;
+- docker compose down without -v;
+- stack recreation using the same named volume;
+- GET of the created task after restart, asserting both title and done=true persisted.
+
+The GitHub Actions job completed successfully and uploaded the artifact named:
+assignment-3-docker-runtime-gate
+Artifact ID: 9510248506
+
+This transcript records only observed output and checks performed by scripts/verify_docker_runtime.sh; it does not reconstruct or invent hidden output.
