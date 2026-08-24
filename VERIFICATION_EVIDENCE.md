@@ -1,30 +1,54 @@
 # Verification Evidence
 
-This file separates current, directly observed results from historical external Docker evidence. It does not present unavailable Docker execution as a pass.
+This file records only executed checks and observed results for the current Assignment 3 code.
 
-## Current corrected-code checks
+## Current-code verification
 
-| Check | Command | Actual result |
-| --- | --- | --- |
-| Assignment 2 compatibility and static suite | `python -m pytest backend/tests -q` | Passed: **10 passed** |
-| Python syntax | `find backend -type f -name '*.py' -print0 \| xargs -0 python -m py_compile` | Passed |
-| Required `.env` Compose rendering | `APP_ENV_FILE=.env.example docker compose --env-file .env.example config` | Passed |
-| Docker verifier shell syntax | `bash -n scripts/verify_docker_runtime.sh` | Passed |
-| Whitespace | `git diff --check -- artifacts/flyrank-backend-assignment-3` | Passed |
+GitHub Actions run `32700227130` executed the current pull-request code on an Ubuntu 24.04 hosted runner using Python 3.13, Docker 28.0.4, and Docker Compose v2.38.2.
 
-## Current Docker runtime attempt
+| Check | Actual result |
+| --- | --- |
+| Assignment 2 compatibility/static suite | **PASS — 10 passed** |
+| Docker runtime available | **PASS** |
+| PostgreSQL container health | **PASS — healthy** |
+| API container startup | **PASS** |
+| Exactly three starter tasks | **PASS** |
+| Live API create/read/update | **PASS** |
+| Direct PostgreSQL `psql` check | **PASS** |
+| `docker compose down` without `-v` | **PASS** |
+| Stack recreation | **PASS** |
+| Named-volume persistence after restart | **PASS** |
+| Workflow job | **PASS** |
 
-The revised verifier was run in this Replit environment. It built the API image, created the isolated network and named volume, and started PostgreSQL. Docker then marked the PostgreSQL container unhealthy before the API service could start:
+The decisive verifier output ended with:
 
 ```text
-Container ...-db-1  Error
-dependency failed to start: container ...-db-1 is unhealthy
+Restarting without -v to prove named-volume persistence.
+Docker runtime verification passed.
 ```
 
-The verifier exited with status `1`. No live CRUD, direct `psql`, or persistence pass is claimed for this corrected-code run in Replit.
+The committed transcript is [`evidence/github-actions-docker-postgres-current.txt`](evidence/github-actions-docker-postgres-current.txt).
 
-## Historical external persistence evidence
+The workflow also uploaded the `assignment-3-docker-runtime-gate` artifact (artifact ID `9510248506`) containing the Docker/Compose version record and runtime verifier output.
 
-Before this Assignment 2 compatibility correction, the same Docker/PostgreSQL architecture was verified on a real GitHub Actions runner: Compose startup, live CRUD, direct `psql` inspection, `docker compose down` followed by `up` without `-v`, named-volume persistence, and a post-restart regression suite all passed.
+## What the runtime verifier proves
 
-That is retained as historical architecture evidence only. It is not represented as a successful Docker run of the current corrected code. The updated verifier now uses the final Assignment 2 request/response contract and must be run on a Docker-capable runner to produce new live proof.
+`scripts/verify_docker_runtime.sh` starts an isolated Compose project with a temporary safe environment file. It then:
+
+1. starts the API and PostgreSQL services;
+2. waits for the API health endpoint;
+3. verifies exactly three seeded tasks;
+4. creates a task through the API;
+5. reads and updates that task through the API;
+6. queries the same row directly with `psql`;
+7. brings the stack down without deleting volumes;
+8. recreates the stack;
+9. verifies the created task still exists with the updated value.
+
+The script cleans up its isolated test volume only after the persistence assertion has passed.
+
+## Earlier Replit limitation
+
+An earlier run in Replit built the image and created the network/volume, but that host marked PostgreSQL unhealthy before the API could start. That failed attempt remains historical environment evidence only and is no longer the current acceptance result.
+
+The current GitHub Actions run above is the authoritative runtime checkpoint for the corrected code.
